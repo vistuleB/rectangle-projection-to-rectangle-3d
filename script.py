@@ -356,82 +356,54 @@ class m33:
             fmt(self.c) + " " + fmt(self.f) + " " + fmt(self.i)
 
 
-class fake_camera_setup:
-    camera_pos = v3(0, 0, 0)
-    camera_x = v3(1, 0, 0)                                              # you must take care that...
-    camera_y = v3(0, 1, 0)                                              # ...these three vectors...
-    camera_z = v3(0, 0, 1)                                              # ...are orthonormal, or else incorrect results will be obtained
-    camera_frame = m33(camera_x, camera_y, camera_z)                    # camera_x, camera_y, camera_z are columns of the matrix
-    device_screen_ax = 45                                               # degrees (half-aperture of camera in x-direction)
-    device_screen_hw = 1000                                             # pixels (half-width of phone screen)
-    screen_distance = device_screen_hw * cot_deg(device_screen_ax)      # pixels
-
-    @classmethod
-    def world_to_screen(cls, in_world):
-        assert isinstance(in_world, v3)
-        in_camera = cls.camera_frame.transpose() * (in_world - cls.camera_pos)  # (like applying Unity's worldToCameraMatrix)
-        return (in_camera * cls.screen_distance / in_camera.z).drop_z()         # (like applying Unity's projectionMatrix)
-
-    @classmethod
-    def screen_to_world(cls, on_screen, z):
-        assert isinstance(on_screen, v2)
-        assert isinstance(z, Real)
-        in_camera = v3(on_screen.x, on_screen.y, cls.screen_distance) * (z / cls.screen_distance)  # (like un-applying Unity's projectionMatrix)
-        return cls.camera_pos + cls.camera_frame * in_camera                                       # (like un-applying Unity's worldToCameraMatrix)
-
-
-def find_the_projection_of_the_3d_A_B_midpoint(A, B, C, D):
+def find_the_projection_of_the_A_B_and_C_D_midpoints_from_the_projections_of_A_B_C_D(A, B, C, D):
+    # this function assumes that A, B, C, D go in clockwise order around the rectangle
+    # (or counter-clockwise would work too, but circular order in any case)
     assert isinstance(A, v2)
     assert isinstance(B, v2)
     assert isinstance(C, v2)
     assert isinstance(D, v2)
 
-    m = m22(B - A, C - D)
+    # system of equations
+    # A + lambda * (B - A) = D + mu * (C - D)
+    # (B - A, D - C) * (lambda, mu) = D - A
+
+    m = m22(B - A, D - C)
 
     try:
-        lambdaMu = m.inverse() * (C - A)
-        O = A + (B - A) * lambdaMu.x
+        lambda_and_mu = m.inverse() * (D - A)
+        O = A + (B - A) * lambda_and_mu.x
+        O_verification = D + (C - D) * lambda_and_mu.y
+
+        # print("")
+        # print("O:           ", O)
+        # print("compare with:", O_verification)
+
         OA = (A - O).norm()
         OB = (B - O).norm()
-        # OM is the harmonic average of OA, OB:
-        OM = 1 / (0.5 * ((1 / OA) + (1 / OB)))
-        return O + (A - O).normalized() * OM
+        OC = (C - O).norm()
+        OD = (D - O).norm()
+
+        OAB = 1 / (0.5 * ((1 / OA) + (1 / OB)))
+        OCD = 1 / (0.5 * ((1 / OC) + (1 / OD)))
+
+        AB_3d_midpoint_projection = O + (A - O).normalized() * OAB
+        CD_3d_midpoint_projection = O + (C - O).normalized() * OCD
+
+        return \
+            AB_3d_midpoint_projection, \
+            CD_3d_midpoint_projection
 
     except SmallDeterminant:
-        return (A + B) / 2
+        return (A + B) / 2, (C + D) / 2
 
 
-real_world_AB_half_sidelength = 1  # meters (say)  
-real_world_BC_half_sidelength = 1  # meters
-
-unit_vector_from_world_A_to_world_B = v3(-2, 1, 1).normalized()  # choose any numbers; for next line as well!
-unit_vector_from_world_B_to_world_C = v3(1, 1, 1).\
-    cross(unit_vector_from_world_A_to_world_B).normalized()  # using 'cross' is a way to get a vector at 90°, because a.cross(b) is perpendicular to both a and b
-
-world_A = v3(100, 100, 1000)
-world_B = world_A + unit_vector_from_world_A_to_world_B * real_world_AB_half_sidelength * 2
-world_C = world_B + unit_vector_from_world_B_to_world_C * real_world_BC_half_sidelength * 2
-world_D = world_A + unit_vector_from_world_B_to_world_C * real_world_BC_half_sidelength * 2
-
-screen_A = fake_camera_setup.world_to_screen(world_A)
-screen_B = fake_camera_setup.world_to_screen(world_B)
-screen_C = fake_camera_setup.world_to_screen(world_C)
-screen_D = fake_camera_setup.world_to_screen(world_D)
-
-screen_M = find_the_projection_of_the_3d_A_B_midpoint(
-    screen_A, 
-    screen_B, 
-    screen_C, 
-    screen_D
-)
-
-
-print("")
-print("computed midpoint projection:", screen_M)
-print("compare with:                ", fake_camera_setup.world_to_screen((world_A + world_B) / 2))
-
-
-def recover_A_and_B_from_their_projections_and_the_projection_of_their_3d_midpoint(screen_A, screen_B, screen_M):
+def recover_two_points_from_their_projections_and_the_projection_of_their_3d_midpoint_and_from_their_3d_distance(
+        screen_A, 
+        screen_B, 
+        screen_M, 
+        original_distance
+    ):
     screen_A_3d = fake_camera_setup.screen_to_world(screen_A, 1)
     screen_B_3d = fake_camera_setup.screen_to_world(screen_B, 1)
     screen_M_3d = fake_camera_setup.screen_to_world(screen_M, 1)
@@ -523,46 +495,134 @@ def recover_A_and_B_from_their_projections_and_the_projection_of_their_3d_midpoi
     # the true gamma is now ours, as well as the true alpha_prime, beta_prime:
     gamma_prime = pi - gamma
     alpha_prime = pi - gamma_prime - alpha
-    beta_prime = pi - gamma - beta
 
     # actual distance from the camera to world_M, by law of sines:
-    AM_for_real = real_world_AB_half_sidelength
-    BM_for_real = real_world_AB_half_sidelength
+    AM_for_real = original_distance / 2
+    BM_for_real = original_distance / 2
 
     OM_for_real = sin(alpha_prime) * AM_for_real / sin(alpha)
-    # OM_for_real_verified = sin(beta_prime) * BM_for_real / sin(beta)
-
     OA_for_real = sin(gamma_prime) * AM_for_real / sin(alpha)
-    # OA_for_real_verified = sin(gamma_prime) * OM_for_real / sin(alpha_prime)
-
     OB_for_real = sin(gamma) * BM_for_real / sin(beta)
-    # OB_for_real_verified = sin(gamma) * OM_for_real / sin(beta_prime)
 
     A_in_camera_coordinates_z_value = OA_for_real / OA  # because OA = screen_A_3d.norm() and because screen_A_3d.z == 1
     B_in_camera_coordinates_z_value = OB_for_real / OB  # because OB = screen_B_3d.norm() and because screen_B_3d.z == 1
-    M_in_camera_coordinates_z_value = OM_for_real / OM  # because OM = screen_M_3d.norm() and because screen_M_3d.z == 1
 
     supposed_world_A = fake_camera_setup.screen_to_world(screen_A, A_in_camera_coordinates_z_value)
     supposed_world_B = fake_camera_setup.screen_to_world(screen_B, B_in_camera_coordinates_z_value)
-    supposed_world_M = fake_camera_setup.screen_to_world(screen_M, M_in_camera_coordinates_z_value)
 
-    print("")
-    print("supposed_world_A:", supposed_world_A)
-    print("compare with:    ", world_A)
+    return supposed_world_A, supposed_world_B
 
-    print("")
-    print("supposed_world_B:", supposed_world_B)
-    print("compare with:    ", world_B)
 
-    print("")
-    print("supposed_world_M:", supposed_world_M)
-    print("compare with    :", (supposed_world_A + supposed_world_B) / 2)
-    
-
-recover_A_and_B_from_their_projections_and_the_projection_of_their_3d_midpoint(
+def find_four_corners_from_projections_and_AB_CD_sidelengths(
     screen_A,
     screen_B,
-    screen_M
+    screen_C,
+    screen_D,
+    AB_real_world_sidelength,
+    CD_real_world_sidelength, # as long as AB, CD are parallel in the real world, this function works (more general than rectangles)
+):
+    # BE CAREFUL THIS FUNCTION ASSUMES THAT A, B, C, D APPEAR EITHER
+    # IN PURELY CLOCKWISE OR PURELY COUNTERCLOCKWISE ORDER
+    screen_AB_mid, screen_CD_mid = find_the_projection_of_the_A_B_and_C_D_midpoints_from_the_projections_of_A_B_C_D(
+        screen_A, 
+        screen_B, 
+        screen_C, 
+        screen_D
+    )
+
+    world_A, world_B = recover_two_points_from_their_projections_and_the_projection_of_their_3d_midpoint_and_from_their_3d_distance(
+        screen_A,
+        screen_B,
+        screen_AB_mid,
+        AB_real_world_sidelength,
+    )
+
+    world_C, world_D = recover_two_points_from_their_projections_and_the_projection_of_their_3d_midpoint_and_from_their_3d_distance(
+        screen_C,
+        screen_D,
+        screen_CD_mid,
+        CD_real_world_sidelength,
+    )
+
+    return world_A, world_B, world_C, world_D
+
+
+def cook_up_example(
+    A_position,
+    AB_direction,
+    other_thing_that_will_turned_into_BC_direction,
+    AB_length,
+    AC_length
+):
+    unit_vector_from_world_A_to_world_B = AB_direction.normalized()
+    unit_vector_from_world_B_to_world_C = \
+        other_thing_that_will_turned_into_BC_direction.cross(unit_vector_from_world_A_to_world_B).normalized()
+
+    world_A = A_position
+    world_B = world_A + unit_vector_from_world_A_to_world_B * AB_length
+    world_C = world_B + unit_vector_from_world_B_to_world_C * AC_length
+    world_D = world_A + unit_vector_from_world_B_to_world_C * AC_length
+    
+    screen_A = fake_camera_setup.world_to_screen(world_A)
+    screen_B = fake_camera_setup.world_to_screen(world_B)
+    screen_C = fake_camera_setup.world_to_screen(world_C)
+    screen_D = fake_camera_setup.world_to_screen(world_D)
+
+    return (screen_A, screen_B, screen_C, screen_D), (world_A, world_B, world_C, world_D)
+
+
+class fake_camera_setup:
+    camera_pos = v3(0, 0, 0)
+    camera_x = v3(1, 0, 0)                                              # you must take care that...
+    camera_y = v3(0, 1, 0)                                              # ...these three vectors...
+    camera_z = v3(0, 0, 1)                                              # ...are orthonormal, or else incorrect results will be obtained
+    camera_frame = m33(camera_x, camera_y, camera_z)                    # camera_x, camera_y, camera_z are columns of the matrix
+    device_screen_ax = 45                                               # degrees (half-aperture of camera in x-direction)
+    device_screen_hw = 1000                                             # pixels (half-width of phone screen)
+    screen_distance = device_screen_hw * cot_deg(device_screen_ax)      # pixels
+
+    @classmethod
+    def world_to_screen(cls, in_world):
+        assert isinstance(in_world, v3)
+        in_camera = cls.camera_frame.transpose() * (in_world - cls.camera_pos)  # (like applying Unity's worldToCameraMatrix)
+        return (in_camera * cls.screen_distance / in_camera.z).drop_z()         # (like applying Unity's projectionMatrix)
+
+    @classmethod
+    def screen_to_world(cls, on_screen, z):
+        assert isinstance(on_screen, v2)
+        assert isinstance(z, Real)
+        in_camera = v3(on_screen.x, on_screen.y, cls.screen_distance) * (z / cls.screen_distance)  # (like un-applying Unity's projectionMatrix)
+        return cls.camera_pos + cls.camera_frame * in_camera                                       # (like un-applying Unity's worldToCameraMatrix)
+
+
+QR_code_size = 2
+
+
+screen_ABCD, actual_ABCD = cook_up_example(
+    v3(100, 100, 1000),
+    v3(-2, 1, 1),
+    v3(1, 1, 1),
+    QR_code_size,
+    QR_code_size,
 )
 
+reconstructed_ABCD = find_four_corners_from_projections_and_AB_CD_sidelengths(
+    screen_ABCD[0],
+    screen_ABCD[1],
+    screen_ABCD[2],
+    screen_ABCD[3],
+    QR_code_size,
+    QR_code_size
+)
+
+
 print("")
+for i in range(4):
+    print(f"actual_ABCD[{i}]:", actual_ABCD[i])
+
+print("")
+print("compare with:")
+for i in range(4):
+    print(f"reconstructed_ABCD[{i}]:", reconstructed_ABCD[i])
+
+
