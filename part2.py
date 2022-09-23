@@ -8,6 +8,10 @@ def _2d_norm(x, y):
 def cot(x):
     return 1 / tan(x)
 
+
+def cot_deg(x):
+    return cot(x * eta / 90)
+
 eta = pi / 2
 
 # made up device-related numbers
@@ -31,8 +35,7 @@ xM = xA + (xB - xA) * 0.45
 yM = yA + (yB - yA) * 0.45
 
 # distance from the camera to the imaginary projection screen, measured in pixels (the same dimensions as the device_screen_hw)
-
-fov = device_screen_hw * cot(device_screen_ax * eta / 90)
+fov = device_screen_hw * cot_deg(device_screen_ax)
 
 FA = sqrt(fov * fov + xA * xA + yA * yA)
 FB = sqrt(fov * fov + xB * xB + yB * yB)
@@ -54,12 +57,11 @@ print(alpha * 90 / eta)
 print(beta * 90 / eta)
 
 
-def ratio_for_gamma(g):
-    g_prime = pi - g
-    alpha_prime = pi - g_prime - alpha
-    beta_prime = pi - g - beta
+def ratio_for_gamma(gamma):
+    gamma_prime = pi - gamma
+    alpha_prime = pi - gamma_prime - alpha
+    beta_prime = pi - gamma - beta
     ratio = (sin(alpha) / sin(alpha_prime)) / (sin(beta) / sin(beta_prime))
-    print(ratio)
     return ratio
 
 
